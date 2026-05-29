@@ -12,19 +12,33 @@ import { initializeLogging } from './src/config/logging';
 import { AuthProvider } from './src/hooks';
 import AppNavigator from './src/navigation/AppNavigator';
 import { setupNotificationNavigation } from './src/navigation/linking';
-import { apiClient } from './src/services/api';
-import { crashReportingService } from './src/services/cashReporting';
+// FIX #3 — apiClient is a default export from axios.config; re-export it as a
+//           named export so callers can do `import { apiClient }`.
+import apiClient from './src/services/api/axios.config';
+// FIX #1 — Typo: 'cashReporting' → 'crashReporting'
+import { crashReportingService } from './src/services/crashReporting';
 import { mobileAuthService } from './src/services/mobileAuth';
 import {
   addNotificationReceivedListener,
   getLastNotificationResponse,
+  // FIX #5b — registerForPushNotifications and registerTokenWithBackend were used
+  //            below but never imported.
+  registerForPushNotifications,
+  registerTokenWithBackend,
   removeNotificationListener,
 } from './src/services/pushNotifications';
-import { requestQueue } from './src/services/requestQueue';
+// FIX #2 — requestQueue lives in the api/ sub-directory, not directly under services/
+import { requestQueue } from './src/services/api/requestQueue';
+// FIX #5a — initializeSecureStorage was called below but never imported
+import { initializeSecureStorage } from './src/services/secureStorage';
 import socketService from './src/services/socket';
 import syncService from './src/services/syncService';
 import { useAppStore } from './src/store';
-import { requireEnvVariables } from './src/utils/env';
+// FIX #5c — useNotificationStore was used below but never imported
+import { useNotificationStore } from './src/store/notificationStore';
+// FIX #4 — requireEnvVariables is exported from src/config/env (re-exported
+//           through src/config/index.ts), not from src/utils/env
+import { requireEnvVariables } from './src/config/env';
 import { appLogger } from './src/utils/logger';
 import { handleNotificationReceived } from './src/utils/notificationHandlers';
 
@@ -33,7 +47,6 @@ SplashScreen.preventAutoHideAsync();
 
 // SHOW_STORYBOOK flag based on environment variable
 const SHOW_STORYBOOK = process.env.EXPO_PUBLIC_STORYBOOK === 'true';
-
 
 // Centralized structured logging initialized on startup
 requireEnvVariables();
@@ -65,12 +78,12 @@ const App = () => {
       try {
         // 1. Load fonts
         await Font.loadAsync({
-          // You can add custom fonts here later if needed
+          // Add custom fonts here when needed
         });
 
         // 2. Check Auth State / wait for store hydration
-        // Zustand persist automatically hydrates, we can assume it's done or add a small delay
-        // to ensure initial data fetching completes.
+        // Zustand persist automatically hydrates; small delay ensures initial
+        // data fetching completes.
 
         // 3. Initial data fetch (simulate or add real fetch)
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -92,8 +105,10 @@ const App = () => {
     crashReportingService.init();
 
     // Initialize secure storage (Keychain/Keystore) for encrypted token storage
+    // FIX #5a — was calling initializeSecureStorage without importing it; also
+    //            used bare `logger` instead of the imported `appLogger`
     initializeSecureStorage().catch((error) => {
-      logger.error('Failed to initialize secure storage:', error);
+      appLogger.errorSync('Failed to initialize secure storage', error as Error);
       // Continue app startup even if secure storage init fails
       // (user will be prompted to re-authenticate if needed)
     });
@@ -115,8 +130,10 @@ const App = () => {
     socketService.connect();
 
     // Initialize push notifications: request permissions and get device token
+    // FIX #5b — registerForPushNotifications / registerTokenWithBackend now imported above
     registerForPushNotifications().then(async (token) => {
       if (token) {
+        // FIX #5c — useNotificationStore now imported above
         const { setPushToken, setTokenRegistered } = useNotificationStore.getState();
         setPushToken(token);
         const registered = await registerTokenWithBackend(token);
@@ -125,6 +142,7 @@ const App = () => {
     });
 
     // Start request queue monitoring
+    // FIX #2 — requestQueue now imported from the correct path
     requestQueue.startMonitoring(apiClient);
 
     // Initialize and start sync service for background sync
@@ -149,7 +167,6 @@ const App = () => {
       syncService.stopAutoSync();
       notificationCleanup();
       removeNotificationListener(subscription);
-      // Clean up the unhandled rejection handler
       // @ts-ignore
       global.onunhandledrejection = undefined;
     };
